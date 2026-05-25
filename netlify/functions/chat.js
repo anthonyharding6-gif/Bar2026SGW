@@ -2,7 +2,7 @@
 // Proxies frontend requests to the Anthropic API with the secret key.
 // Frontend posts { messages, system, max_tokens? } and receives { text }.
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-haiku-4-5-20251001";
 const DEFAULT_MAX_TOKENS = 2048;
 
 exports.handler = async (event) => {
