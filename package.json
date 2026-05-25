@@ -1,0 +1,9 @@
+{
+  "name": "sarah-bar-engine",
+  "version": "1.0.0",
+  "description": "NY bar exam prep engine powered by Claude",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}

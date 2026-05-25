@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#FAFAF7">
+<title>The Bar Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAFAF7;
+    --card: #FFFFFF;
+    --text: #0A0A0A;
+    --text-2: #6B6B68;
+    --text-3: #9A9892;
+    --border: #E8E6E0;
+    --border-soft: #F0EEE8;
+    --cream: #F5F2EA;
+    --accent: #7B1E1E;
+    --navy: #1A1F3A;
+    --green: #2D5F3F;
+    --amber: #B8841C;
+    --warn-bg: #FBF4E8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; }
+  button { font-family: inherit; cursor: pointer; }
+  input, textarea, select { font-family: inherit; outline: none; color: var(--text); }
+  input:focus, textarea:focus, select:focus { border-color: var(--text) !important; }
+  .serif { font-family: 'Fraunces', Georgia, serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .spin { animation: spin 1s linear infinite; }
+  .fade-in { animation: fadeIn 0.25s ease-out; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: #D5D2CA; border-radius: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  pre { white-space: pre-wrap; word-wrap: break-word; }
+  a { color: var(--navy); }
+  /* hide scrollbar on tab nav */
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs { scrollbar-width: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.19.3';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'https://esm.sh/preact@10.19.3/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+
+const html = htm.bind(h);
+
+// ============================================================================
+// PRELOADED CONTENT - 8 UBE SUBJECTS, NY DISTINCTIONS, MPT
+// ============================================================================
+const SUBJECTS = [
+  {
+    id: 'civpro', name: 'Civil Procedure', tested: ['MBE', 'MEE'], weight: 'High', color: '#7B1E1E',
+    topics: [
+      {
+        name: 'Subject Matter Jurisdiction',
+        rules: [
+          'Federal SMJ requires diversity (28 USC 1332) OR federal question (1331). Diversity: complete diversity at filing + amount in controversy exceeds $75,000.',
+          'Citizenship: individuals = domicile (physical presence + intent to remain). Corporations = state of inc AND principal place of business (Hertz nerve center). LLCs/partnerships = citizenship of every member.',
+          'Federal question: well-pleaded complaint rule. Federal issue must appear on face of complaint, not as anticipated defense (Mottley).',
+          'Supplemental jurisdiction (1367): same case or controversy. Diversity carve-out: no supp jx over claims by plaintiffs against parties joined under Rule 14, 19, 20, 24 if it would destroy diversity.',
+          'Removal (1441): any defendant may remove if case could have been filed in federal court. Diversity removal blocked if any D is citizen of forum state. 30-day deadline. Plaintiff cannot remove. 1-year cap on diversity removal.',
+        ],
+        traps: ['Amount in controversy must EXCEED $75,000', 'LLC citizenship traced through every layer of members', 'Removal blocked by in-state defendant only for diversity, not federal question'],
+      },
+      {
+        name: 'Personal Jurisdiction',
+        rules: [
+          'Two-step: (1) state long-arm satisfied, (2) constitutional Due Process (minimum contacts + fair play and substantial justice).',
+          'General jx: D essentially at home (individuals = domicile; corps = state of inc + PPB) (Daimler).',
+          'Specific jx: claim arises from or relates to D contacts with forum (Bristol-Myers Squibb; Ford loosened where contacts substantial).',
+          'Minimum contacts: purposeful availment of forum benefits (Burger King). Stream of commerce: split (OConnor purposeful direction vs Brennan mere stream); Nicastro plurality favors targeting.',
+          'Consent/waiver: appearance, contract clauses, registration to do business (split post-Mallory).',
+        ],
+        traps: ['Conflating general and specific jx', 'Foreseeability alone insufficient - need purposeful availment', 'Ignoring fair play factors as separate prong'],
+      },
+      {
+        name: 'Venue and Erie',
+        rules: [
+          'Venue (1391): proper where (a) any D resides if all Ds in same state, OR (b) substantial part of events/property, OR (c) fallback - any D subject to personal jx.',
+          'Transfer (1404): for convenience, only to district where could have been brought. (1406): improper venue.',
+          'Erie: federal court in diversity applies state substantive + federal procedural. Hanna: if FRCP on point and valid under REA, it applies. No FRCP: outcome-determinative modified by twin aims (forum shopping + inequitable administration).',
+        ],
+        traps: ['Statutes of limitations are SUBSTANTIVE (Guaranty Trust)', 'Choice of law rules from forum state (Klaxon)'],
+      },
+      {
+        name: 'Pleadings, Motions, Joinder',
+        rules: [
+          'Rule 8: short and plain statement. Twombly/Iqbal: plausibility - factual allegations must raise right above speculative.',
+          'Rule 9(b): fraud and mistake pleaded with particularity.',
+          'Rule 12: defenses. Lack of PJ, venue, process, service waived if not raised in first responsive pleading/12(b) motion.',
+          'Rule 15: amend once as of right within 21 days. Relation back: same conduct/transaction; for new D, must have known + known but for mistake would have been named.',
+          'Rule 19 necessary: complete relief impossible, claims interest, risk of inconsistent obligations.',
+          'Rule 20 permissive: same transaction + common question.',
+          'Rule 23: numerosity, commonality, typicality, adequacy + (b)(1), (b)(2), or (b)(3).',
+        ],
+        traps: ['12(b)(6) granted only if no plausible claim accepting facts true', '21-day amend clock from service of original'],
+      },
+      {
+        name: 'Discovery',
+        rules: [
+          'Rule 26(b): scope = nonprivileged matter relevant to claim or defense, proportional to needs.',
+          'Required disclosures (26(a)): witnesses, documents, damages, insurance.',
+          'Work product (26(b)(3)): prepared in anticipation of litigation. Qualified - substantial need + undue hardship. Opinion work product nearly absolute.',
+          'Sanctions (37): cost shifting, adverse inference, strike, default. E-discovery spoliation under 37(e).',
+        ],
+        traps: ['Work product not absolute', 'FRE 502 - inadvertent disclosure not waiver if reasonable steps'],
+      },
+      {
+        name: 'Pretrial and Trial',
+        rules: [
+          'Summary judgment (56): no genuine dispute of material fact + entitled to judgment. Celotex: movant can point to absence of evidence.',
+          'JMOL (50): legally insufficient evidence for reasonable jury. Renewed JMOL within 28 days.',
+          'Jury trial (7th Amend): preserved for actions at law. Historical test - if existed at common law in 1791, jury attaches. Demand: written within 14 days after last pleading.',
+        ],
+        traps: ['Mixed law/equity - legal issues tried first to jury (Beacon Theatres)', 'JMOL viewed in light most favorable to nonmovant'],
+      },
+      {
+        name: 'Preclusion',
+        rules: [
+          'Claim preclusion (res judicata): same parties + valid final judgment on merits + same claim (transactional - same nucleus of operative fact).',
+          'Issue preclusion (collateral estoppel): same issue + actually litigated and determined + necessary to judgment + full and fair opportunity.',
+          'Mutuality abandoned in federal court - nonparty can use offensively (Parklane) or defensively. Due process bars use against nonparty.',
+        ],
+        traps: ['Default judgment may bar claim preclusion but NOT issue preclusion', 'Dismissal without prejudice is not on merits'],
+      },
+      {
+        name: 'Appellate / Final Judgment',
+        rules: [
+          'Final judgment rule (1291): appeal only from final judgments.',
+          'Exceptions: 1292(a) injunctions; 1292(b) controlling question of law certified; Rule 54(b); collateral order (Cohen); mandamus.',
+        ],
+        traps: ['Discovery orders generally not appealable until final judgment', 'Class certification appealable under Rule 23(f) discretionary'],
+      },
+    ],
+  },
+  {
+    id: 'conlaw', name: 'Constitutional Law', tested: ['MBE', 'MEE'], weight: 'High', color: '#1A1F3A',
+    topics: [
+      {
+        name: 'Justiciability',
+        rules: [
+          'Standing: injury in fact + causation + redressability.',
+          'Third-party standing: close relationship + obstacle.',
+          'Taxpayer standing: no, except Establishment Clause + congressional spending (Flast).',
+          'Ripeness/mootness exceptions: capable of repetition yet evading review, voluntary cessation, class actions.',
+          'Political question (Baker v Carr): textually committed + lack of judicially manageable standards.',
+        ],
+        traps: ['Generalized grievance defeats standing', 'Standing assessed at filing'],
+      },
+      {
+        name: 'Congressional Powers',
+        rules: [
+          'Commerce: (1) channels, (2) instrumentalities, (3) activities substantially affecting interstate commerce. Aggregate effects (Wickard).',
+          'Limits: Lopez/Morrison - cannot aggregate noneconomic activity. NFIB v Sebelius - cannot compel commerce.',
+          'Spending: South Dakota v Dole 5 factors. Cannot be coercive (NFIB Medicaid).',
+          'Necessary and Proper: rationally related to enumerated end (McCulloch).',
+          '10th Amend anti-commandeering: cannot compel states to enact (Printz; New York v US).',
+          '14th Sec 5: congruence and proportionality (City of Boerne).',
+        ],
+        traps: ['Commerce power requires economic activity for aggregation', 'Spending conditions must relate to federal interest'],
+      },
+      {
+        name: 'Executive Power',
+        rules: [
+          'Youngstown: (1) with authorization max, (2) silence twilight, (3) against will lowest ebb.',
+          'Treaties: 2/3 Senate. Executive agreements: cannot override federal statute.',
+          'Appointment: principal officers - Senate consent; inferior officers vested elsewhere.',
+          'Removal: at will except limits for independent agencies with single director (Seila Law).',
+          'Privilege: qualified, balanced against need (US v Nixon).',
+        ],
+        traps: ['Pocket veto if Congress adjourns within 10 days', 'Line item veto unconstitutional (Clinton v NYC)'],
+      },
+      {
+        name: 'State Action',
+        rules: [
+          'Constitution restrains government, not private actors.',
+          'Public function doctrine: private actor performing traditional and exclusive govt function (very narrow).',
+          'Entanglement: govt significantly involved (Shelley v Kraemer, joint participation).',
+        ],
+        traps: ['Shopping malls NOT state actors (Lloyd)', 'Licensing/regulation alone insufficient'],
+      },
+      {
+        name: 'Due Process',
+        rules: [
+          'Procedural DP: government deprives life, liberty, property. Mathews v Eldridge: private interest + risk of erroneous deprivation + government interest. Notice + opportunity to be heard.',
+          'Substantive DP: fundamental rights = strict scrutiny. Non-fundamental = rational basis.',
+          'Fundamental: marriage (Obergefell), procreation, contraception (Griswold), parental rights, interstate travel, voting. Abortion post-Dobbs: no federal fundamental right, rational basis.',
+          'Economic liberty: rational basis only (post-Lochner).',
+        ],
+        traps: ['Property = legitimate claim of entitlement, not unilateral expectation (Roth)'],
+      },
+      {
+        name: 'Equal Protection',
+        rules: [
+          'Strict: race, national origin, alienage (federal alienage = rational basis). Post-SFFA race-conscious admissions unconstitutional.',
+          'Intermediate: gender, illegitimacy.',
+          'Rational basis: everything else - very deferential.',
+          'Discriminatory purpose required; disparate impact alone insufficient (Washington v Davis).',
+          'Fundamental rights triggering strict under EP: voting, ballot access, court access, interstate travel.',
+        ],
+        traps: ['Gender = intermediate not strict', 'Sexual orientation - rational basis with bite (Romer, Windsor, Obergefell)'],
+      },
+      {
+        name: 'First Amendment - Speech',
+        rules: [
+          'Content-based: strict scrutiny. Content-neutral TPM: intermediate (significant interest + narrowly tailored + ample alternative channels).',
+          'Unprotected: (1) Brandenburg incitement, (2) fighting words (very narrow), (3) true threats, (4) obscenity (Miller: prurient + patently offensive + lacks SLAPS value), (5) defamation (Sullivan public figures actual malice), (6) child pornography.',
+          'Commercial speech (Central Hudson): lawful + substantial interest + directly advances + not more extensive than necessary.',
+          'Public forum: traditional - strict on content, intermediate on TPM. Nonpublic: reasonable + viewpoint neutral.',
+          'Symbolic speech (OBrien): substantial govt interest + unrelated to suppression + incidental restriction no greater than essential.',
+          'Prior restraint: heavy presumption against (Near).',
+        ],
+        traps: ['Miller obscenity test conjunctive', 'Government employee speech (Pickering) - public concern as citizen'],
+      },
+      {
+        name: 'First Amendment - Religion',
+        rules: [
+          'Establishment: post-Kennedy v Bremerton, historical practices and understandings (Lemon largely abandoned).',
+          'Free Exercise: neutral and generally applicable upheld (Smith). Laws targeting religion = strict scrutiny (Lukumi). RFRA federal level = strict scrutiny.',
+          'Ministerial exception: bar to employment discrimination by ministers.',
+        ],
+        traps: ['Smith baseline - no constitutional right to religious exemption from neutral laws'],
+      },
+      {
+        name: 'Takings',
+        rules: [
+          'Per se physical taking: any permanent physical invasion (Loretto).',
+          'Regulatory takings: Penn Central balancing - economic impact + investment-backed expectations + character of govt action.',
+          'Total economic wipeout = per se (Lucas) unless background nuisance principles.',
+          'Exactions: essential nexus + rough proportionality (Nollan, Dolan, Koontz).',
+          'Just compensation = FMV.',
+        ],
+        traps: ['Public use given broad deference (Kelo)', 'Temporary takings can require compensation (First English)'],
+      },
+    ],
+  },
+  {
+    id: 'contracts', name: 'Contracts (incl. UCC Art. 2)', tested: ['MBE', 'MEE'], weight: 'High', color: '#2D5F3F',
+    topics: [
+      {
+        name: 'Governing Law',
+        rules: [
+          'UCC Art 2: sale of goods (movable, identifiable). Common law: services and real estate.',
+          'Mixed: predominant purpose test (Bonebrake). NY follows predominant purpose.',
+          'Merchant: deals in goods of kind OR holds out as having particular knowledge. Heightened UCC obligations.',
+        ],
+      },
+      {
+        name: 'Formation - Offer',
+        rules: [
+          'Offer = present intent + definite terms + communicated to identified offeree.',
+          'Ads generally not offers unless specific quantity + clear who can accept (Lefkowitz).',
+          'UCC: open price OK (reasonable price filled). Quantity must be specified.',
+          'Termination: revocation on receipt, rejection/counteroffer, lapse, death.',
+          'Irrevocable: (1) option contract with consideration; (2) UCC firm offer (merchant + signed writing + assurance, max 3 months); (3) detrimental reliance (Drennan); (4) part performance of unilateral.',
+        ],
+        traps: ['Revocation must reach offeree before acceptance', 'Firm offer requires merchant AND signed writing AND assurance'],
+      },
+      {
+        name: 'Formation - Acceptance',
+        rules: [
+          'Mirror image (common law): variance = counteroffer.',
+          'UCC 2-207 battle of forms: definite expression of acceptance creates contract even with additional/different terms. Additional terms become part if both merchants UNLESS (1) offer limits, (2) materially alter, (3) objection within reasonable time. Different terms: knockout (majority).',
+          'Mailbox rule: acceptance on dispatch. Rejection on receipt. If acceptance after rejection, first to arrive controls.',
+          'Acceptance by performance (unilateral): cannot revoke once begun (Rest 45 option).',
+          'Silence: generally not, except prior dealings, custom, or knowing benefit.',
+        ],
+        traps: ['UCC 2-207 - material alterations: arbitration, indemnity, warranty disclaimers'],
+      },
+      {
+        name: 'Consideration',
+        rules: [
+          'Bargained-for exchange + legal detriment. Adequacy not examined.',
+          'Pre-existing duty rule (common law): no consideration. UCC: modifications binding without new consideration if in good faith (2-209).',
+          'Past consideration not consideration. Exceptions: moral obligation + material benefit (minority); promise to pay debt barred by SOL or bankruptcy.',
+          'Substitutes: promissory estoppel (promise + reasonable + actual reliance + injustice); restitution.',
+        ],
+        traps: ['UCC modifications - no new consideration needed', 'Illusory promise = no consideration (Wood v Lucy - implied requirement)'],
+      },
+      {
+        name: 'Defenses to Formation',
+        rules: [
+          'Statute of Frauds (MYLEGS): Marriage, 1 Year+, Land, Executor debts, Goods $500+, Suretyship. Writing signed by party to be charged.',
+          'UCC SOF exceptions: specially manufactured + reasonable start; merchant confirmation (silent 10 days); admission; partial performance.',
+          'Capacity: minors voidable, may disaffirm; mental incapacity (understand nature/consequences).',
+          'Mistake: mutual mistake of basic assumption with material effect, no risk allocation. Unilateral: nonmistaken party knew/should have known OR unconscionable.',
+          'Misrepresentation: material (fraudulent OR innocent material) + justifiable reliance.',
+          'Duress: improper threat, no reasonable alternative.',
+          'Unconscionability: procedural + substantive. Assessed at formation.',
+          'Illegality: contract void.',
+        ],
+        traps: ['Contract POSSIBLE to perform within 1 year out of SOF', 'Merchant confirmation: silent merchant bound 10 days'],
+      },
+      {
+        name: 'Terms / Parol Evidence / Warranties',
+        rules: [
+          'Parol evidence: integrated writing bars prior/contemporaneous oral to contradict (complete integration) or supplement (partial). Exceptions: defenses, collateral agreement, ambiguity, condition precedent.',
+          'Implied terms: good faith and fair dealing; UCC gap fillers.',
+          'UCC Warranties: (1) Express - affirmation/promise/description/sample part of bargain; (2) Merchantability - merchant seller + fit for ordinary purposes (disclaimer must mention "merchantability" + conspicuous); (3) Fitness for particular purpose - seller knows purpose + buyer relies.',
+          'Disclaimers: must be conspicuous; AS IS disclaims implied.',
+        ],
+        traps: ['Magnuson-Moss: cannot disclaim implied warranties with written warranty on consumer goods', 'Course of dealing/trade usage admissible'],
+      },
+      {
+        name: 'Performance and Breach',
+        rules: [
+          'Common law: substantial performance suffices; minor breach = damages but other party must perform. Material breach = excuse.',
+          'UCC perfect tender: buyer may reject if goods/tender fail in any respect (with cure rights).',
+          'Installment contracts: substantial impairment + not curable to reject installment.',
+          'Anticipatory repudiation: unequivocal indication of intent not to perform = immediate breach.',
+          'Conditions: precedent must occur before duty. Express conditions strictly construed.',
+        ],
+        traps: ['Perfect tender qualified by good faith + cure + installment substantial impairment', 'Time of essence makes timely performance a condition'],
+      },
+      {
+        name: 'Remedies',
+        rules: [
+          'Expectation damages: as if performed. Loss in value + incidental + consequential - cost avoided.',
+          'Limitations: foreseeability (Hadley); reasonable certainty; mitigation.',
+          'Reliance: out-of-pocket. Restitution: benefit conferred.',
+          'UCC buyer: cover (replacement - contract); market damages (market - contract); consequentials.',
+          'UCC seller: resale (contract - resale); market (contract - market); lost profits if volume seller; action for price.',
+          'Specific performance: unique goods (UCC); land always unique; rare for services.',
+          'Liquidated damages: difficulty estimating + reasonable forecast. Penalty void.',
+        ],
+        traps: ['Lost volume seller - mitigation through resale does not offset', 'No punitive damages for breach of contract'],
+      },
+      {
+        name: 'Third Party Rights',
+        rules: [
+          'Intended beneficiaries vs incidental (no rights). Creditor and donee beneficiaries.',
+          'Assignment: transfer rights. Generally permitted unless (1) materially changes duty/risk, (2) personal services, (3) prohibited. Assignee takes subject to defenses.',
+          'Delegation: transfer duties. Original obligor remains liable unless novation. Personal services cannot be delegated.',
+        ],
+        traps: ['Anti-assignment clauses: prohibits delegation, not assignment unless clear'],
+      },
+    ],
+  },
+  {
+    id: 'crim', name: 'Criminal Law & Procedure', tested: ['MBE', 'MEE'], weight: 'High', color: '#7B1E1E',
+    topics: [
+      {
+        name: 'Homicide',
+        rules: [
+          'Murder = unlawful killing with malice (intent to kill, intent serious bodily harm, depraved heart, felony murder).',
+          'First degree: premeditation + deliberation OR BARRK felonies (burglary, arson, rape, robbery, kidnapping). Second degree = catchall.',
+          'Voluntary manslaughter: intentional in heat of passion + adequate provocation + no cooling time.',
+          'Involuntary: criminal negligence OR unlawful act (misdemeanor manslaughter).',
+          'Felony murder: killing during inherently dangerous felony. Merger doctrine (assault merges). Agency theory (most): no liability for killings by police/victims.',
+        ],
+        traps: ['Provocation requires actual + reasonable; words alone insufficient', 'Co-felon killed by police - most jx no FM liability (agency)'],
+      },
+      {
+        name: 'Other Crimes Against Person',
+        rules: [
+          'Battery: unlawful application of force. General intent.',
+          'Assault: attempted battery OR placing in apprehension of imminent harm.',
+          'False imprisonment: confinement + against will.',
+          'Kidnapping: confinement + movement OR concealment.',
+          'Rape: common law - unlawful intercourse without consent. Modern: gender-neutral, abolish marital exception.',
+        ],
+      },
+      {
+        name: 'Property Crimes',
+        rules: [
+          'Larceny: trespassory taking + carrying away + personal property of another + intent to permanently deprive AT TIME OF TAKING.',
+          'Larceny by trick: possession by misrepresentation. Embezzlement: lawful possession then conversion. False pretenses: title by misrepresentation.',
+          'Robbery: larceny + from person/presence + force or threat.',
+          'Burglary: common law - breaking + entering + dwelling + of another + at night + intent to commit felony.',
+          'Arson: common law - malicious burning of dwelling of another.',
+          'Receiving stolen property: receive + knowing stolen + intent to permanently deprive.',
+        ],
+        traps: ['Larceny intent at time of taking (continuing trespass for after-formed intent)', 'Robbery merges with larceny'],
+      },
+      {
+        name: 'Inchoate / Accomplice',
+        rules: [
+          'Attempt: specific intent + substantial step (MPC) or dangerous proximity (common law).',
+          'Solicitation: ask, encourage, command with intent. Merges into completed crime.',
+          'Conspiracy: agreement + intent to agree + intent to achieve unlawful + overt act (modern majority). Pinkerton: liability for foreseeable crimes of co-conspirators in furtherance.',
+          'Accomplice: aid, abet, encourage with intent that principal commit. Liable for crime + reasonably foreseeable consequences.',
+          'Withdrawal: must communicate + neutralize own contribution. Not defense to conspiracy itself (only subsequent crimes).',
+        ],
+        traps: ['Conspiracy does NOT merge with completed crime', 'Wharton rule: crimes requiring multiple participants (bigamy)'],
+      },
+      {
+        name: 'Defenses',
+        rules: [
+          'Self-defense: reasonable belief imminent unlawful force + proportional + not initial aggressor. Deadly force: only if reasonable belief imminent death/SBH. No duty to retreat in majority (stand your ground); minority retreat before deadly except in home (castle).',
+          'Insanity: M Naghten - did not know nature OR did not know wrong. MPC - lacks substantial capacity. Irresistible impulse. Durham (rare).',
+          'Intoxication: voluntary - negates specific intent only. Involuntary - if meets insanity standard.',
+          'Mistake of fact: defense if negates required mental state. Mistake of law: generally not.',
+          'Duress: not defense to homicide. Necessity: lesser evil.',
+        ],
+      },
+      {
+        name: '4th Amendment',
+        rules: [
+          'Government conduct + reasonable expectation of privacy (Katz). Standing required.',
+          'Warrant: probable cause + particularity + neutral magistrate.',
+          'Warrantless exceptions: (1) SILA (Gant for vehicles - only if arrestee unsecured + within reaching distance OR reason to believe vehicle contains evidence of arrest crime); (2) automobile (PC to believe contains evidence/contraband); (3) plain view (legitimately present + immediately apparent); (4) consent (voluntary; Randolph - present objector wins); (5) Terry stop and frisk (reasonable suspicion + frisk for weapons); (6) hot pursuit/exigent; (7) special needs.',
+          'Standing: own REP. Passengers no standing for vehicle search but standing for seizure (Brendlin).',
+          'Exclusionary rule. Exceptions: independent source, inevitable discovery, attenuation, good faith (Leon).',
+        ],
+        traps: ['Gant narrowed vehicle SILA', 'Carpenter - cell site location info requires warrant', 'Knock and announce violation does NOT trigger exclusion (Hudson)'],
+      },
+      {
+        name: '5th Amendment Confessions',
+        rules: [
+          'Miranda: custodial interrogation requires warnings.',
+          'Custody: reasonable person would not feel free to leave + Mathiason-type restriction.',
+          'Interrogation: express questioning OR words/conduct reasonably likely to elicit (Innis).',
+          'Waiver: knowing + voluntary. Invocation of counsel unambiguous (Davis); invocation of silence scrupulously honored.',
+          'Edwards: once counsel invoked, no further interrogation without counsel (14-day break in custody per Shatzer).',
+          'Public safety exception (Quarles).',
+          '6th Amend right to counsel: attaches at formal charge, offense-specific (Texas v Cobb). Massiah deliberate elicitation.',
+        ],
+        traps: ['Voluntary spontaneous statements not Miranda violation', '5th Amend privilege not for corps; only individuals'],
+      },
+      {
+        name: 'Trial Rights',
+        rules: [
+          '6th Amend confrontation: testimonial out-of-court statements inadmissible unless declarant unavailable + prior opportunity (Crawford). Forfeiture by wrongdoing.',
+          'Jury: right if max > 6 months. Non-unanimous verdicts unconstitutional (Ramos).',
+          'Right to counsel: critical stages where imprisonment imposed (Argersinger).',
+          'Speedy trial (Barker v Wingo): length + reason + assertion + prejudice.',
+          'Double jeopardy: attaches at jury empaneled/sworn or first witness sworn in bench. Same offense (Blockburger): each requires proof element other does not.',
+        ],
+        traps: ['Dual sovereignty - separate sovereigns can prosecute same act', 'Bruton - nontestifying codefendant confession implicating D violates Confrontation'],
+      },
+    ],
+  },
+  {
+    id: 'evidence', name: 'Evidence', tested: ['MBE', 'MEE'], weight: 'High', color: '#1A1F3A',
+    topics: [
+      {
+        name: 'Relevance',
+        rules: [
+          'FRE 401: any tendency to make material fact more or less probable.',
+          'FRE 403: exclude if probative substantially outweighed by unfair prejudice, confusion, misleading, delay, cumulative.',
+          'FRE 404: character generally inadmissible for propensity. Exceptions: (1) criminal D may offer pertinent trait (then prosecution rebut); (2) victim character; (3) sexual assault cases (FRE 413-415).',
+          'MIMIC (404(b)): other crimes for Motive, Intent, Mistake, Identity, Common plan, Knowledge, Preparation, Plan, Opportunity. Notice in criminal.',
+          'Habit (FRE 406): regular response to specific situation.',
+        ],
+        traps: ['Character forms: reputation/opinion always allowed; specific instances only on cross or essential element', 'FRE 413-415 sexual assault propensity exception'],
+      },
+      {
+        name: 'Witnesses',
+        rules: [
+          'Competency: anyone with personal knowledge.',
+          'Impeachment: (1) prior inconsistent statement (extrinsic after opportunity except collateral); (2) bias; (3) character for untruthfulness (608(a) reputation/opinion); (4) specific instances probative of untruthfulness on cross only no extrinsic (608(b)); (5) prior convictions (609 - felony involving dishonesty automatic; other felony 403; misdemeanor only dishonesty); (6) sensory/mental; (7) contradiction.',
+          'Refreshing recollection (612): any item; adverse party may see and use on cross.',
+          'Past recollection recorded (803(5)): once knew + insufficient recollection + made/adopted while fresh + accurate. Read in, not exhibit.',
+        ],
+        traps: ['608(b) - no extrinsic evidence; stuck with answer', '609(a)(2) dishonesty crimes mandatory admission no balancing'],
+      },
+      {
+        name: 'Hearsay - Basics',
+        rules: [
+          '801: out-of-court statement offered for truth.',
+          'Not hearsay (801(d)): (1) prior inconsistent under oath at prior proceeding; (2) prior consistent to rebut recent fabrication; (3) prior identification; (4) admission by party-opponent (own, adoptive, authorized, agent/employee in scope, co-conspirator in furtherance during).',
+          'Non-hearsay uses: verbal acts; effect on listener; state of mind; impeachment.',
+        ],
+        traps: ['Statements offered for falsity, effect, or as verbal acts NOT hearsay', 'Admissions need not be against interest at time made'],
+      },
+      {
+        name: 'Hearsay Exceptions - 803 (available)',
+        rules: [
+          'Present sense impression - describing while perceiving or immediately after.',
+          'Excited utterance - relating to startling event while under stress.',
+          'Then-existing state of mind - intent, motive, plan (Hillmon). NOT memory/belief to prove fact remembered.',
+          'Medical diagnosis/treatment - made for and reasonably pertinent including cause but generally not fault.',
+          'Recorded recollection (803(5)).',
+          'Business records - made at or near time + by/from someone with knowledge + regular practice + kept in regular course.',
+          'Absence of business record to prove non-occurrence.',
+          'Public records: activities of office; matters observed under duty (NOT police observations in criminal against D); factual findings of investigations (civil + against govt in criminal).',
+          'Learned treatises - reliable authority; read in not exhibit.',
+        ],
+        traps: ['Business records - trustworthiness challenge if prepared in anticipation of litigation', 'Medical diagnosis - fault generally inadmissible (exception: child abuse)'],
+      },
+      {
+        name: 'Hearsay Exceptions - 804 (unavailable)',
+        rules: [
+          'Declarant unavailable: privilege, refusal, lack of memory, death/illness, absence + cannot procure.',
+          'Former testimony - prior proceeding + same declarant + party (or in civil, predecessor in interest) had opportunity + similar motive.',
+          'Dying declaration - homicide + all civil + belief death imminent + concerning cause/circumstances.',
+          'Statement against interest - against pecuniary, proprietary, or penal interest + reasonable person would not have made. Criminal case to exculpate D: corroborating circumstances required.',
+          'Forfeiture by wrongdoing.',
+        ],
+        traps: ['Dying declaration: homicide only in criminal, all civil cases', 'Former testimony civil - predecessor in interest sufficient; criminal requires same party'],
+      },
+      {
+        name: 'Privileges and Authentication',
+        rules: [
+          'Attorney-client: communication + confidence + for legal advice + by client to attorney. Held by client. Crime-fraud exception. Survives death.',
+          'Spousal: (1) immunity (testimonial) - cannot be compelled against spouse in criminal; held by witness; ends with marriage; (2) marital communications - confidential during marriage; both hold; survives divorce.',
+          'Psychotherapist-patient (federal Jaffee).',
+          'Authentication (901): evidence sufficient to support finding item is what claimed.',
+          'Self-authenticating (902): certified public records, official publications, newspapers, trade inscriptions, notarized, business records with certification.',
+          'Best Evidence (1002): original required to prove content. Duplicate generally admissible. Exceptions: originals lost, not obtainable, in opponents possession, collateral.',
+        ],
+        traps: ['Attorney-client - third party generally destroys privilege', 'Best Evidence only when proving CONTENT'],
+      },
+    ],
+  },
+  {
+    id: 'property', name: 'Real Property', tested: ['MBE', 'MEE'], weight: 'High', color: '#7B1E1E',
+    topics: [
+      {
+        name: 'Estates and Future Interests',
+        rules: [
+          'Fee simple absolute: largest, freely transferable.',
+          'Defeasible fees: (1) determinable + possibility of reverter (automatic - "so long as"); (2) subject to condition subsequent + right of entry (grantor must exercise - "but if"); (3) subject to executory limitation + executory interest in third party.',
+          'Life estate + reversion or remainder. Pur autre vie. Waste duties.',
+          'Remainders: vested vs contingent. Vested subject to open. Vested subject to divestment.',
+          'Executory interests: shifting vs springing.',
+          'RAP: no interest valid unless must vest, if at all, within lives in being + 21 years. Voids contingent remainders, executory interests, vested remainders subject to open, options. Charity-to-charity exception.',
+        ],
+        traps: ['Life estate not specified = grantor life', 'RAP - look for validating life'],
+      },
+      {
+        name: 'Concurrent Estates',
+        rules: [
+          'Joint tenancy: right of survivorship + 4 unities (TTIP) + clear intent. Severed by sale, mortgage in title-theory states, contract to sell.',
+          'Tenancy in common: no survivorship. Default modern. Each separately devisable.',
+          'Tenancy by entirety: married only. Right of survivorship + cannot be unilaterally severed.',
+          'Co-tenants: each can possess whole. Accounting for third-party rents. Contribution for taxes, mortgage, necessary repairs (not improvements).',
+          'Partition: voluntary or judicial (in kind preferred; by sale if impractical).',
+        ],
+        traps: ['Mortgage by JT: lien theory no severance; title theory severance'],
+      },
+      {
+        name: 'Landlord-Tenant',
+        rules: [
+          'Types: (1) tenancy for years (fixed, no notice); (2) periodic (auto renewal, one full period notice max 6 months); (3) at will; (4) at sufferance (holdover).',
+          'L duties: deliver possession (English actual; American minority legal only); covenant of quiet enjoyment; implied warranty of habitability (residential, cannot waive).',
+          'Constructive eviction: substantial interference + notice + vacate within reasonable time.',
+          'Assignment vs sublease: assignment = entire remaining (assignee in privity with L); sublease = less than entire (not in privity). T remains in privity of K unless novation.',
+        ],
+        traps: ['Implied warranty habitability not commercial', 'Holdover - L may treat as new periodic OR sue for ejectment'],
+      },
+      {
+        name: 'Easements, Covenants, Servitudes',
+        rules: [
+          'Easement: nonpossessory right. Appurtenant (runs with land) vs in gross (personal). Affirmative vs negative (limited: light, air, support, stream water).',
+          'Creation: express (writing); implication from prior use (severance + apparent + reasonable necessity); necessity (severance + strict necessity); prescription (open, notorious, continuous, hostile, statutory period); estoppel.',
+          'Termination: release, merger, abandonment (intent + act), prescription, end of necessity, condemnation, destruction, recording act.',
+          'Real covenants: writing + intent + touch and concern + notice + horizontal privity (burden side) + vertical privity.',
+          'Equitable servitudes: writing (or implied common scheme) + intent + touch and concern + notice. No privity.',
+          'Implied reciprocal servitudes: common scheme + notice.',
+        ],
+        traps: ['Easement by necessity ends when necessity ends; prescription does not', 'Horizontal privity only required for BURDEN to run'],
+      },
+      {
+        name: 'Adverse Possession',
+        rules: [
+          'HELUVA: Hostile (claim of right), Exclusive, Lasting (statutory), Uninterrupted, Visible/open and notorious, Actual.',
+          'Tacking: successive possessors add periods if privity (not mere disseisor).',
+          'Tolling: disabilities at time AP begins.',
+          'Color of title: written instrument purporting to convey - constructive AP of whole tract.',
+        ],
+      },
+      {
+        name: 'Land Sale Contracts and Deeds',
+        rules: [
+          'Contract: SOF writing. Equitable conversion: risk passes to buyer at contract (majority); UVPRA places risk on seller until possession.',
+          'Marketable title implied: reasonably free from doubt. Cured before closing.',
+          'Merger doctrine: contract obligations merge into deed at closing.',
+          'Deed types: general warranty (all covenants), special warranty (grantors own acts), quitclaim (no covenants).',
+          'Present covenants (breached at delivery): seisin, right to convey, against encumbrances. Future (breached on disturbance): quiet enjoyment, warranty, further assurances.',
+          'Recording acts: race (first to record); notice (subsequent BFP without notice); race-notice (subsequent BFP without notice AND first to record). NY = race-notice.',
+          'BFP: pays value + without notice. Donees not protected.',
+          'Shelter rule: from BFP gets BFP protection.',
+        ],
+        traps: ['Quitclaim buyer can still be BFP', 'Mortgage purchaser = BFP; lien creditor often not protected'],
+      },
+      {
+        name: 'Mortgages',
+        rules: [
+          'Theories: lien (majority) vs title.',
+          'Transfer: original mortgagor remains on note. Transferee: assumption (personal liability) vs subject to (no personal liability, property subject to foreclosure).',
+          'Foreclosure: judicial or non-judicial. Junior interests destroyed if joined; senior survive.',
+          'Equitable redemption pre-foreclosure. Statutory redemption (some states post).',
+          'Priority: first in time, first in right. PMM prioritized over prior judgment liens.',
+        ],
+        traps: ['Due-on-sale enforceable (Garn-St Germain)', 'Equitable mortgage - absolute deed as security'],
+      },
+    ],
+  },
+  {
+    id: 'torts', name: 'Torts', tested: ['MBE', 'MEE'], weight: 'High', color: '#2D5F3F',
+    topics: [
+      {
+        name: 'Intentional Torts',
+        rules: [
+          'Transferred intent: across persons and across 5 historic torts (battery, assault, FI, trespass to land, trespass to chattels).',
+          'Battery: harmful or offensive contact + with person + intent + causation.',
+          'Assault: reasonable apprehension of imminent battery.',
+          'False imprisonment: act intending to confine + actual confinement + aware or harmed.',
+          'IIED: extreme/outrageous + intent or recklessness + severe ED. Bystander: present + family + D knew (some jx).',
+          'Trespass to land: physical invasion + intent to enter. Strict for intrusion.',
+          'Trespass to chattels (minor) vs conversion (substantial - forced sale).',
+          'Defenses: consent; self-defense + defense of others (reasonable + proportional); defense of property (no deadly force solely to protect - Katko); necessity (public complete; private qualified - must pay actual damages).',
+        ],
+        traps: ['Transferred intent NOT to IIED or conversion', 'Shopkeeper privilege - reasonable detention'],
+      },
+      {
+        name: 'Negligence - Duty and Breach',
+        rules: [
+          'Duty: reasonable person under similar circumstances. Owed to foreseeable plaintiffs in zone of danger (Cardozo) vs all harmed (Andrews).',
+          'Special standards: children (subjective unless adult activities); professionals (custom; medical national for specialists); common carriers/innkeepers high duty.',
+          'Landowner traditional: trespassers (no willful/wanton; known/anticipated - artificial conditions; attractive nuisance for children); licensees (warn known dangers); invitees (reasonable care including inspect for unknown). Modern: unitary reasonable care (Rowland).',
+          'Negligence per se: violation of statute = breach if plaintiff in protected class + harm of type designed to prevent.',
+          'Res ipsa: type does not occur without negligence + exclusive control + no contribution.',
+          'Hand formula: B < PL.',
+        ],
+        traps: ['Foreseeability for duty AND proximate cause', 'Statute violation alone insufficient without causal connection'],
+      },
+      {
+        name: 'Negligence - Causation and Damages',
+        rules: [
+          'Actual cause: but-for. Multiple sufficient: substantial factor. Multiple Ds unclear: alternative liability (Summers v Tice burden shifts); market share (DES).',
+          'Proximate: foreseeable harm. Eggshell plaintiff. Intervening foreseeable does not break; superseding (extraordinary) cuts off.',
+          'Damages: actual required. PI: medical, lost wages, P&S. Property: difference in value or repair.',
+          'Collateral source rule (modified by statute in many).',
+          'Avoidable consequences: must mitigate.',
+        ],
+        traps: ['Suicide as superseding - foreseeable if D caused mental illness', 'Rescuer doctrine - danger invites rescue (Cardozo)'],
+      },
+      {
+        name: 'Defenses to Negligence',
+        rules: [
+          'Contributory negligence (few jx MD, AL, NC, VA, DC): complete bar. Last clear chance.',
+          'Comparative (majority): pure or modified (50% or 51% bar).',
+          'Assumption of risk: express (watch unconscionability) or implied (knowledge + voluntary). Modern: into comparative fault.',
+        ],
+      },
+      {
+        name: 'Strict Liability',
+        rules: [
+          'Animals: wild (strict for characteristic harm); domestic (strict only if owner knows dangerous propensity); trespassing livestock (strict).',
+          'Abnormally dangerous: high degree of risk + great harm + cannot eliminate by reasonable care + uncommon + inappropriate location + value outweighed.',
+          'Limited to harm from dangerous propensity.',
+          'Defenses: AOR; some comparative fault jx.',
+        ],
+      },
+      {
+        name: 'Products Liability',
+        rules: [
+          'Theories: negligence; strict liability (commercial supplier + defective when left + not substantially altered); warranty (UCC); misrepresentation.',
+          'Defects: (1) manufacturing (departure from intended design); (2) design (consumer expectation OR risk-utility - reasonable alternative); (3) warning (failure to warn non-obvious; learned intermediary for Rx drugs).',
+          'Defenses: AOR, comparative fault (most), misuse if unforeseeable.',
+          'Privity not required (MacPherson; Greenman).',
+        ],
+        traps: ['Bystanders can recover', 'Disclaimers ineffective for PI in strict liability'],
+      },
+      {
+        name: 'Nuisance, Defamation, Privacy, Economic Torts',
+        rules: [
+          'Private nuisance: substantial + unreasonable interference with use/enjoyment of land. Balancing.',
+          'Public nuisance: unreasonable interference with right common to public. Private action requires special harm.',
+          'Defamation: defamatory statement of fact + of/concerning + publication to third party + damages (presumed in libel and slander per se: crime, loathsome disease, unchastity, business). Constitutional: public official/figure actual malice (NYT v Sullivan); private on public concern at least negligence (Gertz).',
+          'Privacy: intrusion; public disclosure private facts; false light; appropriation.',
+          'Fraud: material misrepresentation of fact + scienter + intent to induce + justifiable reliance + damages.',
+          'Tortious interference: valid K/expectancy + knowledge + intentional inducement + absence of justification + damages.',
+        ],
+      },
+      {
+        name: 'Vicarious Liability',
+        rules: [
+          'Respondeat superior: employer liable for employee within scope. Frolic vs detour. Intentional torts generally outside unless authorized or foreseeable.',
+          'Independent contractors: hirer generally not liable. Exceptions: inherently dangerous, non-delegable duties, apparent authority.',
+          'Joint and several liability (traditional). Modern: many jx several only or apportioned.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'bizassoc', name: 'Business Associations', tested: ['MEE'], weight: 'Medium-High', color: '#1A1F3A',
+    topics: [
+      {
+        name: 'Agency',
+        rules: [
+          'Formation: assent + benefit + control.',
+          'Authority: (1) actual express; (2) actual implied (necessary or custom); (3) apparent (principal manifests + reasonable belief); (4) ratification (knowledge of material facts).',
+          'Liability in K: disclosed principal liable, agent not. Partially disclosed: both. Undisclosed: both.',
+          'Liability in tort: respondeat superior - employer for employee in scope.',
+          'Fiduciary duties: loyalty, care, obedience, accounting.',
+        ],
+        traps: ['Apparent authority - principal manifestation required, not agent claim', 'Ratification - knowledge of all material facts'],
+      },
+      {
+        name: 'Partnerships',
+        rules: [
+          'GP formation: 2+ persons + carrying on as co-owners + for profit. No formalities. Sharing profits = presumptive (with exceptions for wages, rent, debt).',
+          'Partners are agents (apparent for ordinary course). Jointly and severally liable for partnership obligations (RUPA).',
+          'Fiduciary: loyalty, care, good faith.',
+          'Profits/losses: equally unless agreed (RUPA default).',
+          'Dissolution: at-will - any partner notice. Term - unanimous or wrongful.',
+          'Winding up priority: (1) creditors including partner-creditors, (2) capital, (3) profits.',
+          'LP: at least one GP + LPs (liability to investment). LP loses limited liability if participate in control (relaxed under RULPA).',
+          'LLP: protects partners from vicarious liability for other partners malpractice.',
+        ],
+        traps: ['New partner not liable for prior partnership debts beyond capital', 'Partner authority for non-ordinary course requires actual'],
+      },
+      {
+        name: 'Corporations - Formation and Powers',
+        rules: [
+          'Formation: file articles. Corporation exists on filing (de jure).',
+          'De facto: good faith attempt + colorable compliance + corporate operation.',
+          'Corporation by estoppel.',
+          'Promoter liability: liable on pre-incorporation Ks UNLESS novation. Corporation not liable until adopts.',
+          'Ultra vires: modern statutes limit defense (shareholder injunction, corp against officer, AG dissolution).',
+          'Piercing veil: (1) alter ego (commingling, disregard formalities, undercapitalization); (2) fraud or injustice. Easier for closely held.',
+        ],
+      },
+      {
+        name: 'Corporations - Governance',
+        rules: [
+          'Shareholders: own, elect directors, vote fundamentals. Generally no management.',
+          'Annual meeting required. Special meetings by board, 10%+, or as articles.',
+          'Quorum: majority of shares entitled to vote.',
+          'Proxies: revocable unless coupled with interest. 11 months max.',
+          'Inspection rights: proper purpose.',
+          'Derivative suits: contemporaneous ownership + demand on board OR demand excused (futility). Recovery to corporation.',
+          'Direct suits: distinct harm.',
+        ],
+        traps: ['Demand futility: majority of board disinterested + independent + acted on informed basis', 'NY does NOT recognize universal demand futility - allows demand-excused suits'],
+      },
+      {
+        name: 'Fiduciary Duties',
+        rules: [
+          'Duty of care: good faith + ordinary prudent person + reasonably in best interests. BJR presumption: informed + good faith + rational basis.',
+          'Duty of loyalty: no self-dealing, no usurpation, no competing. Self-dealing: voidable unless (1) disclosure + disinterested directors, (2) disclosure + shareholders, OR (3) fair.',
+          'Corporate opportunity: within line of business + financially able + interest/expectancy. Must offer first.',
+          'Indemnification: mandatory if successful on merits. Permissive in derivative suits if good faith.',
+          'Sale of control: Revlon duties when sale/breakup inevitable - best price.',
+        ],
+        traps: ['Exculpatory provisions can eliminate care liability but NOT loyalty, bad faith, or intentional', 'BJR does not apply to loyalty cases'],
+      },
+      {
+        name: 'LLCs',
+        rules: [
+          'Hybrid: limited liability + partnership tax default + flexible management.',
+          'Formation: file articles of organization. Operating agreement (NY requires written).',
+          'Management: member-managed (default) or manager-managed.',
+          'Fiduciary duties similar to partners; modifiable by OA (cannot eliminate good faith).',
+          'Limited liability except personal torts and piercing.',
+        ],
+      },
+      {
+        name: 'Federal Securities Overview',
+        rules: [
+          'Rule 10b-5: material misrepresentation/omission + scienter + connection with purchase/sale + reliance (fraud on market presumed - Basic) + economic loss + loss causation.',
+          'Section 16(b): 10%+, officers, directors disgorge short-swing profits within 6 months.',
+          'Section 11: registration statement misstatement liability.',
+        ],
+      },
+    ],
+  },
+];
+
+const NY_DISTINCTIONS = [
+  { area: 'Civil Procedure (CPLR)', rules: [
+    'NY courts: Supreme Court (general jx), Surrogate (probate), Family, Civil Court of City of NY (up to $50K).',
+    'SOL: contracts 6 years (213); personal injury 3 years; med mal 2.5 years; intentional torts 1 year; defamation 1 year; property damage 3 years.',
+    'Service: personal delivery OR leave with suitable age + mail OR nail and mail (CPLR 308).',
+    'Notice of Claim against municipalities: 90 days; action within 1 year 90 days.',
+    'No general right to amend pleadings as of right after 20 days (CPLR 3025).',
+    'NY does NOT recognize universal demand futility for derivative suits.',
+  ]},
+  { area: 'Wills and Estates (EPTL/SCPA)', rules: [
+    'NY wills: 2 witnesses, testator signs at end, witnesses attest within 30 days (EPTL 3-2.1).',
+    'NY does NOT recognize holographic or nuncupative wills (except armed services).',
+    'Spousal elective share: greater of $50K or 1/3 net estate (EPTL 5-1.1-A).',
+    'Anti-lapse: applies if predeceased beneficiary is issue or sibling of testator.',
+    'No common law marriage in NY.',
+  ]},
+  { area: 'Domestic Relations', rules: [
+    'Equitable distribution state. Marital property: acquired during marriage (with exceptions).',
+    'No-fault divorce: irretrievable breakdown 6+ months (DRL 170(7)).',
+    'Maintenance formula based on income with judicial discretion.',
+    'Best interests standard for custody.',
+  ]},
+  { area: 'Real Property', rules: [
+    'NY is race-notice recording jurisdiction.',
+    'Adverse possession: 10 years (RPAPL 501).',
+    'Tenancy by the entirety for married couples.',
+    'Implied warranty of habitability residential - cannot waive (RPL 235-b).',
+    'Mortgages: lien theory in NY.',
+  ]},
+  { area: 'Criminal Procedure (CPL)', rules: [
+    'No death penalty in NY.',
+    'Speedy trial CPL 30.30: ready within 6 months (felonies), 90 days (Class A misdemeanor).',
+    'Suppression hearings: Mapp (4th), Huntley (statements), Wade (ID), Dunaway (PC for arrest).',
+    'Grand jury required for felony indictment (Const Art I 6) - 23 jurors, 12 needed.',
+  ]},
+  { area: 'Contracts and UCC', rules: [
+    'NY follows predominant purpose for mixed contracts.',
+    'NY recognizes promissory estoppel.',
+    'SOF: contracts for goods $500+, contracts not to be performed in lifetime, real property.',
+    'NY GOL 5-1105: written promise to pay debt barred by SOL enforceable without new consideration.',
+  ]},
+  { area: 'Business Associations (BCL/LLCL)', rules: [
+    'NY LLC requires written operating agreement (LLCL 417) AND publication (2 newspapers).',
+    'NY corporation: biennial statement; franchise tax.',
+    'NY follows MBCA-style fiduciary rules with modifications.',
+  ]},
+];
+
+const MPT_SKILLS = [
+  { skill: 'Reading the File', tips: 'Read task memo FIRST. Then summary of facts, then statements/exhibits. Library second - skim for relevance. Allocate 45 min reading, 45 writing per 90-min task.' },
+  { skill: 'Organizing the Library', tips: 'Cases: identify rule, key facts, holding. Statutes: parse elements. Distinguish controlling vs persuasive. Cross-reference to facts.' },
+  { skill: 'Drafting Standards', tips: 'Use IRAC or CRAC for memos. Persuasive briefs: theme, point headings. Letters: tone, plain English. Tailor format to task memo demands.' },
+  { skill: 'Common Tasks', tips: 'Persuasive brief, objective memo, demand letter, opinion letter, settlement agreement, discovery plan, jury instructions, opening/closing, legal contention chart.' },
+  { skill: 'Time Management', tips: '90 minutes per task. 15 min skim file/library, 30 min organize/outline, 45 min write. Watch the clock. Conclusory writing beats no writing.' },
+];
+
+// ============================================================================
+// SYSTEM PROMPT
+// ============================================================================
+const SYSTEM_PROMPT = `You are a New York bar exam coach with deep expertise in the legacy UBE (MBE, MEE, MPT) and NY-specific law. You are coaching a first-year associate prepping for the July 2026 NY bar.
+
+Format every answer:
+- State the black-letter rule FIRST, clearly
+- Note majority vs minority splits where relevant
+- Flag common essay traps the examiners use
+- Surface NY-specific distinctions if they differ from UBE majority
+- Cite controlling cases or restatement sections when useful
+- Be dense and useful, not chatty
+
+Subjects in scope: Civil Procedure, Constitutional Law, Contracts (incl. UCC Art. 2), Criminal Law and Procedure, Evidence, Real Property, Torts, Business Associations.
+
+Effective July 2026, NCBE dropped Conflict of Laws, Family Law, Trusts and Estates, and Secured Transactions from the MEE.
+
+If she gives you a fact pattern, do exhaustive issue spotting subject by subject with rule, IRAC framework, and traps. If she asks for flashcards, give clean Q/A pairs. If she pastes her own essay, grade it 1-6 on issue ID, rule accuracy, analysis, structure, conclusion.
+
+Default to dense, structured, rule-first responses. No hand-holding.`;
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+const ls = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+async function callEngine(messages, system, max_tokens = 2048) {
+  const res = await fetch('/.netlify/functions/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, system, max_tokens }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Engine error');
+  return data.text;
+}
+
+// ============================================================================
+// ICONS (inline SVG)
+// ============================================================================
+const Icon = {
+  send: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>`,
+  spark: (color = '#7B1E1E') => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke=${color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
+  arrow: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
+  back: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>`,
+  chev: (down) => html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${down ? html`<path d="m6 9 6 6 6-6"/>` : html`<path d="m9 18 6-6-6-6"/>`}</svg>`,
+  trash: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+  copy: () => html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+  check: () => html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2D5F3F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  save: () => html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>`,
+  alert: (color = '#B8841C') => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke=${color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  spin: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>`,
+  plus: () => html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
+};
+
+// ============================================================================
+// APP
+// ============================================================================
+function App() {
+  const [view, setView] = useState('ask');
+  const [settings, setSettings] = useState(() => ls.get('bar:settings') || { name: 'Sarah', examDate: '2026-07-28' });
+
+  const daysToExam = useMemo(() => {
+    const exam = new Date(settings.examDate);
+    const now = new Date();
+    return Math.max(0, Math.ceil((exam - now) / (1000 * 60 * 60 * 24)));
+  }, [settings.examDate]);
+
+  const saveSettings = (s) => { setSettings(s); ls.set('bar:settings', s); };
+
+  return html`
+    <div style=${{ minHeight: '100vh' }}>
+      <${Header} view=${view} setView=${setView} daysToExam=${daysToExam} name=${settings.name} />
+      <main style=${{ maxWidth: 1080, margin: '0 auto', padding: '24px 16px 100px' }}>
+        ${view === 'ask' && html`<${AskView} />`}
+        ${view === 'subjects' && html`<${SubjectsView} />`}
+        ${view === 'spotter' && html`<${SpotterView} />`}
+        ${view === 'essays' && html`<${EssaysView} />`}
+        ${view === 'cards' && html`<${CardsView} />`}
+        ${view === 'ny' && html`<${NYView} />`}
+        ${view === 'mpt' && html`<${MPTView} />`}
+        ${view === 'settings' && html`<${SettingsView} settings=${settings} onSave=${saveSettings} />`}
+      </main>
+    </div>
+  `;
+}
+
+function Header({ view, setView, daysToExam, name }) {
+  const tabs = [
+    { id: 'ask', label: 'Ask' },
+    { id: 'subjects', label: 'Subjects' },
+    { id: 'spotter', label: 'Issue Spotter' },
+    { id: 'essays', label: 'Essays' },
+    { id: 'cards', label: 'Cards' },
+    { id: 'ny', label: 'NY' },
+    { id: 'mpt', label: 'MPT' },
+    { id: 'settings', label: 'Settings' },
+  ];
+  return html`
+    <header style=${{
+      borderBottom: '1px solid var(--border)',
+      background: 'rgba(250,250,247,0.92)',
+      backdropFilter: 'blur(20px)',
+      position: 'sticky', top: 0, zIndex: 50,
+    }}>
+      <div style=${{ maxWidth: 1080, margin: '0 auto', padding: '16px 16px 0' }}>
+        <div style=${{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
+          <div>
+            <div class="serif" style=${{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1 }}>The Bar Engine</div>
+            <div style=${{ fontSize: 10, color: 'var(--text-2)', marginTop: 4, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 500 }}>${name} &middot; NY UBE &middot; July 2026</div>
+          </div>
+          <div style=${{ textAlign: 'right' }}>
+            <div class="serif tnum" style=${{ fontSize: 20, fontWeight: 500, color: daysToExam < 30 ? 'var(--accent)' : 'var(--text)' }}>${daysToExam}</div>
+            <div style=${{ fontSize: 9.5, color: 'var(--text-2)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>days to exam</div>
+          </div>
+        </div>
+        <nav class="tabs" style=${{ display: 'flex', gap: 0, overflowX: 'auto' }}>
+          ${tabs.map(t => html`
+            <button onClick=${() => setView(t.id)} style=${{
+              background: 'none', border: 'none', padding: '12px 14px', fontSize: 13.5,
+              color: view === t.id ? 'var(--text)' : 'var(--text-2)',
+              borderBottom: view === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              fontWeight: view === t.id ? 600 : 500, marginBottom: -1, whiteSpace: 'nowrap',
+            }}>${t.label}</button>
+          `)}
+        </nav>
+      </div>
+    </header>
+  `;
+}
+
+// ============================================================================
+// ASK VIEW
+// ============================================================================
+const SUGGESTIONS = [
+  'Walk me through specific personal jurisdiction post-Ford',
+  'Compare Crawford testimonial vs nontestimonial with examples',
+  'Mini-outline on the dormant Commerce Clause',
+  'Felony murder: merger doctrine and agency theory',
+  'Top 10 NY-specific MEE traps',
+  'Hearsay 803 exceptions flashcards',
+];
+
+function AskView() {
+  const [messages, setMessages] = useState(() => ls.get('bar:chat') || []);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(() => ls.get('bar:saved') || []);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  const send = async (text) => {
+    const q = (text || input).trim();
+    if (!q || loading) return;
+    const next = [...messages, { role: 'user', content: q }];
+    setMessages(next);
+    setInput('');
+    setLoading(true);
+    try {
+      const reply = await callEngine(next.map(m => ({ role: m.role, content: m.content })), SYSTEM_PROMPT, 2048);
+      const after = [...next, { role: 'assistant', content: reply }];
+      setMessages(after);
+      ls.set('bar:chat', after.slice(-50));
+    } catch (e) {
+      const after = [...next, { role: 'assistant', content: '[Error] ' + e.message }];
+      setMessages(after);
+    }
+    setLoading(false);
+  };
+
+  const saveAnswer = () => {
+    if (messages.length < 2) return;
+    const a = messages[messages.length - 1];
+    const q = messages[messages.length - 2];
+    if (a.role !== 'assistant') return;
+    const next = [{ id: Date.now().toString(), q: q.content, a: a.content }, ...saved].slice(0, 100);
+    setSaved(next);
+    ls.set('bar:saved', next);
+  };
+
+  const clear = () => {
+    setMessages([]);
+    ls.set('bar:chat', []);
+  };
+
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 18 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Ask the engine</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Rule-first answers, NY distinctions surfaced, examiner traps flagged.</p>
+      </div>
+
+      ${messages.length === 0 ? html`
+        <div style=${{ display: 'grid', gap: 8, marginBottom: 20 }}>
+          ${SUGGESTIONS.map(s => html`
+            <button onClick=${() => send(s)} style=${{
+              padding: '14px 16px', background: 'white', border: '1px solid var(--border)', borderRadius: 12,
+              textAlign: 'left', fontSize: 14, color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <span style=${{ display: 'flex', alignItems: 'center', gap: 10 }}>${Icon.spark()} ${s}</span>
+              ${Icon.arrow()}
+            </button>
+          `)}
+        </div>
+      ` : html`
+        <div ref=${scrollRef} style=${{ maxHeight: '60vh', overflowY: 'auto', marginBottom: 12, paddingRight: 4 }}>
+          ${messages.map((m, i) => html`<${Bubble} key=${i} role=${m.role} content=${m.content} />`)}
+          ${loading && html`
+            <div style=${{ padding: '12px 14px', background: 'white', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-2)', fontSize: 13 }}>
+              ${Icon.spin()} Researching...
+            </div>
+          `}
+        </div>
+      `}
+
+      <div style=${{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <textarea
+          value=${input}
+          onInput=${e => setInput(e.target.value)}
+          onKeyDown=${e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); }}
+          placeholder="Ask anything. Cmd+Enter to send."
+          rows=${2}
+          style=${{ flex: 1, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 12, fontSize: 14, background: 'white', resize: 'none' }}
+        />
+        <button onClick=${() => send()} disabled=${loading || !input.trim()} style=${{
+          padding: '12px 16px', background: 'var(--text)', color: 'white', border: 'none', borderRadius: 12,
+          display: 'flex', alignItems: 'center', gap: 6, opacity: (!input.trim() || loading) ? 0.4 : 1, fontWeight: 500, fontSize: 14,
+        }}>${Icon.send()} Send</button>
+      </div>
+
+      ${messages.length > 0 && html`
+        <div style=${{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'var(--text-2)' }}>
+          <span>${messages.length} messages</span>
+          <div style=${{ display: 'flex', gap: 8 }}>
+            <button onClick=${saveAnswer} style=${{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 11, color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>${Icon.save()} Save last</button>
+            <button onClick=${clear} style=${{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 500, padding: 0 }}>Clear thread</button>
+          </div>
+        </div>
+      `}
+
+      ${saved.length > 0 && messages.length === 0 && html`
+        <div style=${{ marginTop: 32 }}>
+          <h3 class="serif" style=${{ fontSize: 18, fontWeight: 500, marginBottom: 12 }}>Saved (${saved.length})</h3>
+          <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            ${saved.slice(0, 5).map(s => html`
+              <div key=${s.id} style=${{ padding: 12, background: 'white', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div style=${{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>${s.q.slice(0, 100)}${s.q.length > 100 ? '...' : ''}</div>
+                <div style=${{ fontSize: 12.5, color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>${s.a.slice(0, 200)}...</div>
+              </div>
+            `)}
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function Bubble({ role, content }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    try { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  const isError = content.startsWith('[Error]');
+  return html`
+    <div style=${{
+      padding: '12px 14px',
+      background: role === 'user' ? 'var(--cream)' : (isError ? 'var(--warn-bg)' : 'white'),
+      border: '1px solid var(--border)', borderRadius: 12, marginBottom: 8,
+    }}>
+      <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 6 }}>
+        ${role === 'user' ? 'You' : 'Engine'}
+      </div>
+      <div style=${{ fontSize: 14, lineHeight: 1.55, color: 'var(--text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${content}</div>
+      ${role === 'assistant' && !isError && html`
+        <button onClick=${copy} style=${{ marginTop: 8, padding: '4px 8px', background: 'none', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, color: 'var(--text-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          ${copied ? Icon.check() : Icon.copy()} ${copied ? 'Copied' : 'Copy'}
+        </button>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================================
+// SUBJECTS VIEW
+// ============================================================================
+function SubjectsView() {
+  const [selected, setSelected] = useState(null);
+
+  if (selected) return html`<${SubjectDetail} subject=${selected} onBack=${() => setSelected(null)} />`;
+
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 20 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Subject library</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Eight UBE subjects. Tap one to drill in. Each topic has a deep-dive button that calls the engine for nuanced rules, mnemonics, and NY twists.</p>
+      </div>
+      <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+        ${SUBJECTS.map(s => html`
+          <button key=${s.id} onClick=${() => setSelected(s)} style=${{
+            padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 14,
+            textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
+            <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div class="serif" style=${{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', lineHeight: 1.2 }}>${s.name}</div>
+              <div style=${{ width: 8, height: 8, borderRadius: '50%', background: s.color, marginTop: 6 }} />
+            </div>
+            <div style=${{ display: 'flex', gap: 6, fontSize: 10.5, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              ${s.tested.map(t => html`<span>${t}</span>`)}
+            </div>
+            <div style=${{ fontSize: 12, color: 'var(--text-2)', marginTop: 'auto', paddingTop: 6 }}>${s.topics.length} topics &middot; ${s.weight}</div>
+          </button>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+function SubjectDetail({ subject, onBack }) {
+  const [expanded, setExpanded] = useState(null);
+  return html`
+    <div class="fade-in">
+      <button onClick=${onBack} style=${{ background: 'none', border: 'none', color: 'var(--text-2)', fontSize: 13, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
+        ${Icon.back()} Back to subjects
+      </button>
+      <div style=${{ marginBottom: 20 }}>
+        <h1 class="serif" style=${{ fontSize: 30, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>${subject.name}</h1>
+        <div style=${{ display: 'flex', gap: 8, marginTop: 6, fontSize: 12, color: 'var(--text-2)' }}>
+          <span>Tested: <strong style=${{ color: 'var(--text)' }}>${subject.tested.join(', ')}</strong></span>
+          <span>&middot;</span>
+          <span>Weight: <strong style=${{ color: 'var(--text)' }}>${subject.weight}</strong></span>
+        </div>
+      </div>
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        ${subject.topics.map((t, i) => html`<${TopicAccordion} key=${i} topic=${t} subject=${subject} expanded=${expanded === i} onToggle=${() => setExpanded(expanded === i ? null : i)} />`)}
+      </div>
+    </div>
+  `;
+}
+
+function TopicAccordion({ topic, subject, expanded, onToggle }) {
+  const [deep, setDeep] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const deepDive = async (e) => {
+    e.stopPropagation();
+    setLoading(true);
+    try {
+      const text = await callEngine(
+        [{ role: 'user', content: `Subject: ${subject.name}\nTopic: ${topic.name}\n\nGive me the deeper dive: refined rule statements with nuances, common essay fact patterns and what to spot, NY distinctions, and a 1-2 sentence memorization mnemonic. Be dense.` }],
+        SYSTEM_PROMPT, 1800
+      );
+      setDeep(text);
+    } catch (e) {
+      setDeep('[Error] ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  return html`
+    <div style=${{ background: 'white', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <button onClick=${onToggle} style=${{
+        width: '100%', padding: '14px 16px', background: 'none', border: 'none',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
+      }}>
+        <div class="serif" style=${{ fontSize: 16, fontWeight: 500 }}>${topic.name}</div>
+        ${Icon.chev(expanded)}
+      </button>
+      ${expanded && html`
+        <div style=${{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
+          <div style=${{ paddingTop: 12 }}>
+            <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Black-letter rules</div>
+            <ol style=${{ margin: '6px 0 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.55 }}>
+              ${topic.rules.map((r, i) => html`<li key=${i} style=${{ marginBottom: 6 }}>${r}</li>`)}
+            </ol>
+          </div>
+          ${topic.traps && topic.traps.length > 0 && html`
+            <div style=${{ marginTop: 12, padding: 10, background: 'var(--warn-bg)', borderRadius: 8 }}>
+              <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Essay traps</div>
+              <ul style=${{ margin: '6px 0 0', paddingLeft: 16, fontSize: 12.5, lineHeight: 1.5 }}>
+                ${topic.traps.map((t, i) => html`<li key=${i} style=${{ marginBottom: 3 }}>${t}</li>`)}
+              </ul>
+            </div>
+          `}
+          <div style=${{ marginTop: 12 }}>
+            <button onClick=${deepDive} disabled=${loading} style=${btnSecondary}>
+              ${loading ? html`${Icon.spin()} Researching...` : html`${Icon.spark()} Deep dive`}
+            </button>
+          </div>
+          ${deep && html`
+            <div style=${{ marginTop: 12, padding: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>${deep}</div>
+          `}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================================
+// ISSUE SPOTTER
+// ============================================================================
+function SpotterView() {
+  const [text, setText] = useState('');
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const spot = async () => {
+    if (!text.trim()) return;
+    setLoading(true);
+    try {
+      const sys = `You are a NY UBE issue spotter. Read the fact pattern and return structured analysis:
+
+1. **Issues raised** - organized by subject area, exhaustive.
+2. **Controlling rule** - one tight rule statement per issue.
+3. **Analysis framework** - how to attack each issue in IRAC.
+4. **Examiner traps** - red herrings, lurking sub-issues, NY distinctions.
+
+Be dense, structured, use clear headers.`;
+      const out = await callEngine([{ role: 'user', content: text }], sys, 3000);
+      setResult(out);
+    } catch (e) {
+      setResult('[Error] ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 18 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Issue spotter</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Paste a fact pattern. Get every issue, controlling rules, attack framework, and likely traps.</p>
+      </div>
+      <textarea
+        value=${text}
+        onInput=${e => setText(e.target.value)}
+        placeholder="Paste the fact pattern here..."
+        rows=${10}
+        style=${{ width: '100%', padding: '14px 16px', border: '1px solid var(--border)', borderRadius: 12, fontSize: 14, background: 'white', resize: 'vertical', lineHeight: 1.5 }}
+      />
+      <div style=${{ marginTop: 12, display: 'flex', gap: 8 }}>
+        <button onClick=${spot} disabled=${loading || !text.trim()} style=${{ ...btnPrimary, opacity: (!text.trim() || loading) ? 0.4 : 1 }}>
+          ${loading ? html`${Icon.spin()} Spotting...` : html`${Icon.spark('white')} Spot issues`}
+        </button>
+        ${text && html`<button onClick=${() => { setText(''); setResult(null); }} style=${btnSecondary}>Clear</button>`}
+      </div>
+      ${result && html`
+        <div style=${{ marginTop: 20, padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12 }}>
+          <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 12 }}>Analysis</div>
+          <div style=${{ fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>${result}</div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================================
+// ESSAYS VIEW
+// ============================================================================
+function EssaysView() {
+  const [mode, setMode] = useState('grade');
+  const [prompt, setPrompt] = useState('');
+  const [response, setResponse] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const [generated, setGenerated] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [subject, setSubject] = useState('contracts');
+
+  const generate = async () => {
+    setLoading(true);
+    try {
+      const subjectName = SUBJECTS.find(s => s.id === subject)?.name || 'Contracts';
+      const sys = `You are an NCBE essay drafter. Write a realistic MEE-style essay prompt on the requested subject. Include: (1) a multi-paragraph fact pattern with multiple buried issues, (2) 2-4 specific call-of-the-question items at the end. Mirror MEE style. Target 30-minute response time.`;
+      const out = await callEngine([{ role: 'user', content: `Draft a MEE-style prompt on ${subjectName}.` }], sys, 2000);
+      setGenerated(out);
+      setPrompt(out);
+    } catch (e) {
+      setGenerated('[Error] ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  const grade = async () => {
+    if (!response.trim() || !prompt.trim()) return;
+    setLoading(true);
+    try {
+      const sys = `You are a NYBOLE grader evaluating an MEE essay. Score the response 1-6 on each dimension:
+
+1. **Issue identification** - every issue spotted?
+2. **Rule statement accuracy** - black-letter rules correct?
+3. **Analysis depth** - applied rules to facts vs conclusory?
+4. **IRAC structure** - organization?
+5. **Conclusion** - reasonable, supported?
+
+Identify missed issues, weak rule statements, NY distinctions overlooked. Be direct, not gentle. Then give a 1-paragraph rewrite of the weakest section.`;
+      const out = await callEngine([{ role: 'user', content: `**Prompt:**\n${prompt}\n\n**Response:**\n${response}` }], sys, 2500);
+      setFeedback(out);
+    } catch (e) {
+      setFeedback('[Error] ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 18 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Essay lab</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Generate MEE-style prompts or get IRAC responses graded.</p>
+      </div>
+      <div style=${{ display: 'flex', gap: 4, marginBottom: 16, background: 'white', padding: 4, borderRadius: 10, border: '1px solid var(--border)', width: 'fit-content' }}>
+        <button onClick=${() => setMode('grade')} style=${pill(mode === 'grade')}>Grade my essay</button>
+        <button onClick=${() => setMode('generate')} style=${pill(mode === 'generate')}>Generate prompt</button>
+      </div>
+
+      ${mode === 'generate' && html`
+        <div>
+          <div style=${{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value=${subject} onChange=${e => setSubject(e.target.value)} style=${input}>
+              ${SUBJECTS.map(s => html`<option key=${s.id} value=${s.id}>${s.name}</option>`)}
+            </select>
+            <button onClick=${generate} disabled=${loading} style=${{ ...btnPrimary, opacity: loading ? 0.4 : 1 }}>
+              ${loading ? html`${Icon.spin()} Generating...` : html`${Icon.spark('white')} Generate prompt`}
+            </button>
+          </div>
+          ${generated && html`<div style=${{ padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>${generated}</div>`}
+        </div>
+      `}
+
+      ${mode === 'grade' && html`
+        <div>
+          <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 6 }}>The prompt</div>
+          <textarea value=${prompt} onInput=${e => setPrompt(e.target.value)} rows=${4} placeholder="Paste the essay prompt..." style=${{ ...input, width: '100%', resize: 'vertical', lineHeight: 1.5 }} />
+          <div style=${{ marginTop: 12, fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 6 }}>Your response</div>
+          <textarea value=${response} onInput=${e => setResponse(e.target.value)} rows=${12} placeholder="Write your IRAC response here..." style=${{ ...input, width: '100%', resize: 'vertical', lineHeight: 1.5 }} />
+          <div style=${{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <button onClick=${grade} disabled=${loading || !response.trim() || !prompt.trim()} style=${{ ...btnPrimary, opacity: (loading || !response.trim() || !prompt.trim()) ? 0.4 : 1 }}>
+              ${loading ? html`${Icon.spin()} Grading...` : html`${Icon.spark('white')} Grade it`}
+            </button>
+          </div>
+          ${feedback && html`
+            <div style=${{ marginTop: 20, padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12 }}>
+              <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 12 }}>Grader feedback</div>
+              <div style=${{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>${feedback}</div>
+            </div>
+          `}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================================
+// FLASHCARDS
+// ============================================================================
+function CardsView() {
+  const [decks, setDecks] = useState(() => ls.get('bar:decks') || []);
+  const [activeDeck, setActiveDeck] = useState(null);
+  const [studyIndex, setStudyIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [subject, setSubject] = useState('contracts');
+
+  const generate = async () => {
+    if (!topic.trim()) return;
+    setGenerating(true);
+    try {
+      const subjectName = SUBJECTS.find(s => s.id === subject)?.name || subject;
+      const sys = `You are a bar prep flashcard generator. Generate 8-12 flashcards covering the topic. Each card: Q = question or rule prompt; A = precise black-letter answer with key nuances. Format STRICTLY as JSON array, NO other text, NO markdown fences:
+[{"q":"...", "a":"..."}, ...]`;
+      const out = await callEngine([{ role: 'user', content: `Subject: ${subjectName}\nTopic: ${topic}\n\nGenerate the flashcards.` }], sys, 2000);
+      const clean = out.replace(/```json\n?|```/g, '').trim();
+      let cards = [];
+      try { cards = JSON.parse(clean); } catch {}
+      if (cards.length === 0) {
+        alert('Could not generate cards. Try again.');
+        setGenerating(false);
+        return;
+      }
+      const deck = { id: Date.now().toString(), name: topic, subject: subjectName, cards };
+      const next = [deck, ...decks];
+      setDecks(next);
+      ls.set('bar:decks', next);
+      setTopic('');
+    } catch (e) {
+      alert('Generation error: ' + e.message);
+    }
+    setGenerating(false);
+  };
+
+  const deleteDeck = (id) => {
+    const next = decks.filter(d => d.id !== id);
+    setDecks(next);
+    ls.set('bar:decks', next);
+  };
+
+  if (activeDeck) {
+    const card = activeDeck.cards[studyIndex];
+    return html`
+      <div class="fade-in">
+        <button onClick=${() => { setActiveDeck(null); setStudyIndex(0); setFlipped(false); }} style=${{ background: 'none', border: 'none', color: 'var(--text-2)', fontSize: 13, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
+          ${Icon.back()} Back to decks
+        </button>
+        <h1 class="serif" style=${{ fontSize: 24, fontWeight: 400, letterSpacing: '-0.02em', margin: 0, marginBottom: 4 }}>${activeDeck.name}</h1>
+        <div class="tnum" style=${{ fontSize: 12, color: 'var(--text-2)', marginBottom: 20 }}>${studyIndex + 1} of ${activeDeck.cards.length}</div>
+        <div onClick=${() => setFlipped(!flipped)} style=${{
+          padding: 28, background: 'white', border: '1px solid var(--border)', borderRadius: 16,
+          minHeight: 280, cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        }}>
+          <div style=${{ fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 16 }}>
+            ${flipped ? 'Answer' : 'Question'}
+          </div>
+          <div class="serif" style=${{ fontSize: 19, lineHeight: 1.45, fontWeight: flipped ? 400 : 500 }}>${flipped ? card.a : card.q}</div>
+          <div style=${{ marginTop: 20, fontSize: 11, color: 'var(--text-3)', textAlign: 'center' }}>Tap to ${flipped ? 'show question' : 'reveal answer'}</div>
+        </div>
+        <div style=${{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+          <button onClick=${() => { setStudyIndex(Math.max(0, studyIndex - 1)); setFlipped(false); }} disabled=${studyIndex === 0} style=${{ ...btnSecondary, opacity: studyIndex === 0 ? 0.4 : 1 }}>
+            ${Icon.back()} Prev
+          </button>
+          <button onClick=${() => { setStudyIndex(Math.min(activeDeck.cards.length - 1, studyIndex + 1)); setFlipped(false); }} disabled=${studyIndex === activeDeck.cards.length - 1} style=${{ ...btnPrimary, opacity: studyIndex === activeDeck.cards.length - 1 ? 0.4 : 1 }}>
+            Next ${Icon.arrow()}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 18 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Flashcards</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Generate decks on demand. Saved automatically.</p>
+      </div>
+      <div style=${{ padding: 16, background: 'white', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 20 }}>
+        <div style=${{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) 2fr auto', gap: 8 }}>
+          <select value=${subject} onChange=${e => setSubject(e.target.value)} style=${input}>
+            ${SUBJECTS.map(s => html`<option key=${s.id} value=${s.id}>${s.name}</option>`)}
+          </select>
+          <input value=${topic} onInput=${e => setTopic(e.target.value)} placeholder="Topic e.g. Hearsay exceptions" style=${input} />
+          <button onClick=${generate} disabled=${generating || !topic.trim()} style=${{ ...btnPrimary, opacity: (generating || !topic.trim()) ? 0.4 : 1 }}>
+            ${generating ? html`${Icon.spin()}` : html`${Icon.plus()}`}
+          </button>
+        </div>
+      </div>
+      ${decks.length === 0 ? html`
+        <div style=${{ padding: 40, background: 'white', border: '1px dashed var(--border)', borderRadius: 12, textAlign: 'center', color: 'var(--text-2)' }}>
+          No decks yet. Generate your first above.
+        </div>
+      ` : html`
+        <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+          ${decks.map(d => html`
+            <div key=${d.id} style=${{ padding: 16, background: 'white', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column' }}>
+              <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                <div class="serif" style=${{ fontSize: 16, fontWeight: 500, lineHeight: 1.3 }}>${d.name}</div>
+                <button onClick=${() => deleteDeck(d.id)} style=${{ background: 'none', border: 'none', padding: 4, cursor: 'pointer' }}>${Icon.trash()}</button>
+              </div>
+              <div style=${{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>${d.subject}</div>
+              <div class="tnum" style=${{ fontSize: 11, color: 'var(--text-2)', marginTop: 8 }}>${d.cards.length} cards</div>
+              <button onClick=${() => { setActiveDeck(d); setStudyIndex(0); setFlipped(false); }} style=${{ ...btnPrimary, marginTop: 12, justifyContent: 'center' }}>Study</button>
+            </div>
+          `)}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// ============================================================================
+// NY DISTINCTIONS
+// ============================================================================
+function NYView() {
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 20 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>New York distinctions</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>NY-specific rules that depart from UBE majority. Also tested directly on the NYLE.</p>
+      </div>
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        ${NY_DISTINCTIONS.map(d => html`
+          <div key=${d.area} style=${{ padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12 }}>
+            <div class="serif" style=${{ fontSize: 18, fontWeight: 500, marginBottom: 10, color: 'var(--accent)' }}>${d.area}</div>
+            <ul style=${{ margin: 0, paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6 }}>
+              ${d.rules.map((r, i) => html`<li key=${i} style=${{ marginBottom: 6 }}>${r}</li>`)}
+            </ul>
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// MPT
+// ============================================================================
+function MPTView() {
+  return html`
+    <div class="fade-in">
+      <div style=${{ marginBottom: 20 }}>
+        <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0 }}>Performance test primer</h1>
+        <p style=${{ color: 'var(--text-2)', fontSize: 14, marginTop: 4 }}>Two 90-minute tasks. 20% of UBE score. Everything is in the library - skill is execution under pressure.</p>
+      </div>
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        ${MPT_SKILLS.map(s => html`
+          <div key=${s.skill} style=${{ padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12 }}>
+            <div class="serif" style=${{ fontSize: 17, fontWeight: 500, marginBottom: 8 }}>${s.skill}</div>
+            <div style=${{ fontSize: 13.5, lineHeight: 1.55 }}>${s.tips}</div>
+          </div>
+        `)}
+      </div>
+      <div style=${{ marginTop: 20, padding: 16, background: 'var(--cream)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        ${Icon.alert('#B8841C')}
+        <div style=${{ fontSize: 13, lineHeight: 1.55 }}>
+          <strong>Practice with real materials.</strong> NCBE publishes past MPT items free at ncbex.org. Time yourself, write under exam conditions, then paste your draft into the Essay Lab for grading.
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// SETTINGS
+// ============================================================================
+function SettingsView({ settings, onSave }) {
+  const [form, setForm] = useState(settings);
+  const dirty = JSON.stringify(form) !== JSON.stringify(settings);
+
+  const clearAll = () => {
+    if (!confirm('Clear all chat history, decks, and saved answers? This cannot be undone.')) return;
+    ['bar:chat', 'bar:saved', 'bar:decks'].forEach(k => localStorage.removeItem(k));
+    alert('Cleared. Reload the page.');
+  };
+
+  return html`
+    <div class="fade-in" style=${{ maxWidth: 560 }}>
+      <h1 class="serif" style=${{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', margin: 0, marginBottom: 20 }}>Settings</h1>
+      <div style=${{ padding: 18, background: 'white', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <label style=${{ display: 'block', marginBottom: 12 }}>
+          <span style=${{ fontSize: 11, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, display: 'block', marginBottom: 6 }}>Name</span>
+          <input value=${form.name} onInput=${e => setForm({ ...form, name: e.target.value })} style=${{ ...input, width: '100%' }} />
+        </label>
+        <label style=${{ display: 'block', marginBottom: 12 }}>
+          <span style=${{ fontSize: 11, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, display: 'block', marginBottom: 6 }}>Exam date</span>
+          <input type="date" value=${form.examDate} onInput=${e => setForm({ ...form, examDate: e.target.value })} style=${{ ...input, width: '100%' }} />
+        </label>
+        ${dirty && html`
+          <div style=${{ marginTop: 16, display: 'flex', gap: 8 }}>
+            <button onClick=${() => onSave(form)} style=${btnPrimary}>Save</button>
+            <button onClick=${() => setForm(settings)} style=${btnSecondary}>Cancel</button>
+          </div>
+        `}
+      </div>
+      <div style=${{ marginTop: 16, padding: 16, background: 'var(--cream)', border: '1px solid var(--border)', borderRadius: 12, fontSize: 12.5, lineHeight: 1.55 }}>
+        <strong>About this engine.</strong> Pre-loaded with high-yield outlines for the 8 UBE subjects tested July 2026 onward. NCBE dropped Conflict of Laws, Family Law, T&amp;E, and Secured Transactions from the MEE effective July 2026. Always verify against the latest NCBE and NYBOLE materials.
+      </div>
+      <div style=${{ marginTop: 16 }}>
+        <button onClick=${clearAll} style=${{ ...btnSecondary, color: 'var(--accent)', borderColor: 'var(--border)' }}>${Icon.trash()} Clear all local data</button>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// STYLES (shared)
+// ============================================================================
+const input = { padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14, background: 'white', color: 'var(--text)' };
+const btnPrimary = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'var(--text)', color: 'white', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 500, cursor: 'pointer' };
+const btnSecondary = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'white', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13.5, fontWeight: 500, cursor: 'pointer' };
+const pill = (active) => ({ padding: '8px 14px', background: active ? 'var(--text)' : 'transparent', color: active ? 'white' : 'var(--text-2)', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' });
+
+// ============================================================================
+// MOUNT
+// ============================================================================
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+</body>
+</html>
